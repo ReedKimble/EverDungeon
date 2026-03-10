@@ -1789,7 +1789,6 @@ export class Renderer {
     const leftArmCenter = attach(leftShoulder, leftArmRot, { x: 0, y: 0, z: leftArmLength * 0.5 });
     const leftWrist = attach(leftShoulder, leftArmRot, { x: 0, y: 0, z: leftArmLength });
     const leftHandCenter = attach(leftWrist, leftArmRot, { x: 0, y: 0, z: leftHandLength * 0.5 });
-
     parts.push({
       color: "#7b5d49",
       pos: leftArmCenter,
@@ -1819,7 +1818,6 @@ export class Renderer {
     const rightWrist = attach(rightShoulder, rightArmRot, { x: 0, y: 0, z: rightArmLength });
     const rightHandCenter = attach(rightWrist, rightArmRot, { x: 0, y: 0, z: rightHandLength * 0.5 });
     const rightGrip = attach(rightWrist, rightArmRot, { x: 0.014, y: -0.008, z: 0.06 });
-
     parts.push({
       color: "#7b5d49",
       pos: rightArmCenter,
@@ -1844,7 +1842,6 @@ export class Renderer {
       const guardCenter = attach(rightGrip, toolRot, { x: 0, y: 0.012, z: handleLength + 0.02 });
       const bladeCenter = attach(rightGrip, toolRot, { x: 0, y: 0.02, z: handleLength + 0.16 });
       const bladeTip = attach(rightGrip, toolRot, { x: 0, y: 0.024, z: handleLength + 0.245 });
-
       parts.push({
         color: "#6e543f",
         pos: handleCenter,
@@ -1879,7 +1876,6 @@ export class Renderer {
       const handleCenter = attach(rightGrip, toolRot, { x: 0, y: 0, z: handleLength * 0.5 });
       const headCenter = attach(rightGrip, toolRot, { x: 0, y: 0.014, z: handleLength + 0.03 });
       const pickBeakCenter = attach(rightGrip, toolRot, { x: 0.14, y: 0, z: handleLength + 0.015 });
-
       parts.push({
         color: "#6e543f",
         pos: handleCenter,
@@ -1898,6 +1894,41 @@ export class Renderer {
         size: { x: 0.085, y: 0.04, z: 0.07 },
         rot: toolRot,
       });
+    } else if (selectedTool === ToolId.HATCHET) {
+      const handleLength = 0.46;
+      const toolRot = {
+        x: rightArmRot.x + 0.08,
+        y: rightArmRot.y + 0.28,
+        z: rightArmRot.z + 0.2,
+      };
+      const handleCenter = attach(rightGrip, toolRot, { x: 0, y: 0, z: handleLength * 0.5 });
+      const headCenter = attach(rightGrip, toolRot, { x: 0.07, y: 0.012, z: handleLength + 0.02 });
+      const bladeCenter = attach(rightGrip, toolRot, { x: 0.13, y: 0.012, z: handleLength + 0.02 });
+      const pollCenter = attach(rightGrip, toolRot, { x: -0.09, y: 0.01, z: handleLength + 0.02 });
+      parts.push({
+        color: "#6e543f",
+        pos: handleCenter,
+        size: { x: 0.048, y: 0.048, z: handleLength },
+        rot: toolRot,
+      });
+      parts.push({
+        color: "#bcc6d2",
+        pos: headCenter,
+        size: { x: 0.14, y: 0.07, z: 0.08 },
+        rot: toolRot,
+      });
+      parts.push({
+        color: "#dce5ee",
+        pos: bladeCenter,
+        size: { x: 0.11, y: 0.035, z: 0.08 },
+        rot: toolRot,
+      });
+      parts.push({
+        color: "#aeb8c4",
+        pos: pollCenter,
+        size: { x: 0.06, y: 0.05, z: 0.07 },
+        rot: toolRot,
+      });
     } else {
       const handleLength = 0.5;
       const toolRot = {
@@ -1908,7 +1939,6 @@ export class Renderer {
       const handleCenter = attach(rightGrip, toolRot, { x: 0, y: 0, z: handleLength * 0.5 });
       const hammerHeadCenter = attach(rightGrip, toolRot, { x: 0, y: 0.01, z: handleLength + 0.025 });
       const hammerPeenCenter = attach(rightGrip, toolRot, { x: 0.1, y: 0, z: handleLength + 0.025 });
-
       parts.push({
         color: "#6e543f",
         pos: handleCenter,
@@ -2114,82 +2144,3 @@ export class Renderer {
     ctx.stroke();
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

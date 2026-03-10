@@ -36,6 +36,7 @@ export const ObjectType = Object.freeze({
 export const ToolId = Object.freeze({
   KNIFE: "knife",
   PICKAXE: "pickaxe",
+  HATCHET: "hatchet",
   HAMMER: "hammer",
 });
 
@@ -51,6 +52,12 @@ export const TOOL_DEFINITIONS = Object.freeze({
     label: "Pickaxe",
     icon: "PK",
     className: "res-toolpickaxe",
+  },
+  [ToolId.HATCHET]: {
+    id: ToolId.HATCHET,
+    label: "Hatchet",
+    icon: "HT",
+    className: "res-toolhatchet",
   },
   [ToolId.HAMMER]: {
     id: ToolId.HAMMER,
@@ -268,7 +275,7 @@ export const BUILD_DEFINITIONS = Object.freeze({
   [BuildId.SMELTER]: {
     name: "Smelter Workbench",
     icon: "SM",
-    costs: { [ResourceId.STONE]: 6, [ResourceId.IRON_INGOT]: 2 },
+    costs: { [ResourceId.STONE]: 12, [ResourceId.WOODY_ROOT]: 4 },
   },
   [BuildId.STOVE]: {
     name: "Stove Workbench",

@@ -180,6 +180,7 @@ const PLAYER_MAX_STAMINA = 100;
 const PLAYER_MAX_MANA = 100;
 const STAMINA_REGEN_DELAY = 1.5;
 const STAMINA_REGEN_RATE = 18;
+const RUN_STAMINA_DRAIN_RATE = 4;
 const SIMPLE_STEW_HEAL_TOTAL = 20;
 const SIMPLE_STEW_HEAL_DURATION = 30;
 const NPC_SPAWN_RADIUS = 20;
@@ -205,9 +206,10 @@ const ALLIED_GATHER_STACK_TARGET = 10;
 const ALLIED_ROOM_HEAL_RATE = 1.6;
 const ALLIED_RETREAT_HEALTH_RATIO = 0.5;
 const TOOL_SWING_STAMINA_COST = Object.freeze({
-  [ToolId.KNIFE]: 8,
-  [ToolId.PICKAXE]: 12,
-  [ToolId.HAMMER]: 10,
+  [ToolId.KNIFE]: 5,
+  [ToolId.PICKAXE]: 10,
+  [ToolId.HATCHET]: 7,
+  [ToolId.HAMMER]: 8,
 });
 
 const HOTBAR_PAGE_COUNT = 3;
@@ -226,8 +228,8 @@ const CONSUMABLE_RESOURCE_IDS = new Set([ResourceId.SIMPLE_STEW]);
 const DEFAULT_TOOLBAR_LOADOUT = Object.freeze([
   { kind: ACTION_ITEM_KIND.TOOL, id: ToolId.KNIFE },
   { kind: ACTION_ITEM_KIND.TOOL, id: ToolId.PICKAXE },
+  { kind: ACTION_ITEM_KIND.TOOL, id: ToolId.HATCHET },
   { kind: ACTION_ITEM_KIND.TOOL, id: ToolId.HAMMER },
-  null,
   null,
   null,
   null,
@@ -283,8 +285,8 @@ const ALLIED_GATHERABLE_RESOURCES = new Set([
 ]);
 const RESOURCE_TO_REQUIRED_TOOL = Object.freeze({
   [ResourceId.STONE_BLOCK]: ToolId.PICKAXE,
-  [ResourceId.WOODY_ROOT]: ToolId.PICKAXE,
-  [ResourceId.MUSHROOM]: ToolId.PICKAXE,
+  [ResourceId.WOODY_ROOT]: ToolId.HATCHET,
+  [ResourceId.MUSHROOM]: ToolId.HATCHET,
   [ResourceId.COPPER_ORE]: ToolId.PICKAXE,
   [ResourceId.ZINC_ORE]: ToolId.PICKAXE,
   [ResourceId.IRON_ORE]: ToolId.PICKAXE,
@@ -820,12 +822,12 @@ export class Game {
         [ResourceId.IRON_ORE]: 0,
         [ResourceId.COPPER_INGOT]: 0,
         [ResourceId.ZINC_INGOT]: 0,
-        [ResourceId.IRON_INGOT]: 2,
+        [ResourceId.IRON_INGOT]: 0,
         [ResourceId.COPPER_COIN]: 0,
         [ResourceId.SILVER_COIN]: 0,
         [ResourceId.GOLD_COIN]: 0,
-        [ResourceId.STONE]: 12,
-        [ResourceId.STONE_BLOCK]: 6,
+        [ResourceId.STONE]: 0,
+        [ResourceId.STONE_BLOCK]: 0,
         [ResourceId.WOODY_ROOT]: 0,
         [ResourceId.MUSHROOM]: 0,
         [ResourceId.MEAT]: 0,
@@ -845,6 +847,7 @@ export class Game {
       ownedTools: {
         [ToolId.KNIFE]: true,
         [ToolId.PICKAXE]: true,
+        [ToolId.HATCHET]: true,
         [ToolId.HAMMER]: true,
       },
       selectedSlot: 0,
@@ -998,7 +1001,13 @@ export class Game {
       const hasMovement = forward !== 0 || strafe !== 0;
       if (hasMovement) {
         const moveScale = forward !== 0 && strafe !== 0 ? Math.SQRT1_2 : 1;
-        const sprint = this.input.isDown("ShiftLeft") || this.input.isDown("ShiftRight");
+        const sprintRequested = this.input.isDown("ShiftLeft") || this.input.isDown("ShiftRight");
+        const sprint = sprintRequested && player.stamina > 0;
+        if (sprint) {
+          const runStaminaCost = RUN_STAMINA_DRAIN_RATE * dt;
+          player.stamina = Math.max(0, player.stamina - runStaminaCost);
+          player.staminaRegenLockout = STAMINA_REGEN_DELAY;
+        }
         const speed = player.moveSpeed * (sprint ? player.sprintMultiplier : 1) * moveScale;
 
         const forwardX = Math.cos(player.angle);
@@ -2857,6 +2866,8 @@ export class Game {
       this.performKnifePrimary();
     } else if (toolId === ToolId.PICKAXE) {
       this.performPickaxePrimary();
+    } else if (toolId === ToolId.HATCHET) {
+      this.performHatchetPrimary();
     } else if (toolId === ToolId.HAMMER) {
       this.performHammerPrimary();
     }
@@ -3746,19 +3757,6 @@ export class Game {
       return;
     }
 
-    if (target.kind === "object" && target.object.type === ObjectType.WOODY_ROOT) {
-      this.world.removeObject(target.tileX, target.tileY);
-      this.addResource(ResourceId.WOODY_ROOT, 1, { trackCollection: true });
-      this.hud.pushMessage("Harvested woody roots (+1 wood).");
-      return;
-    }
-
-    if (target.kind === "object" && target.object.type === ObjectType.MUSHROOM) {
-      this.world.removeObject(target.tileX, target.tileY);
-      this.addResource(ResourceId.MUSHROOM, 1, { trackCollection: true });
-      this.hud.pushMessage("Harvested mushroom (+1 mushroom).");
-      return;
-    }
 
     if (target.kind === "object" && target.object.type === ObjectType.PICKUP) {
       this.hud.pushMessage("Move onto the pickup to collect it.");
@@ -3778,10 +3776,49 @@ export class Game {
       return;
     }
 
-    this.hud.pushMessage("Pickaxe can mine ore nodes, woody roots, mushrooms, and cavern blocks.");
+    this.hud.pushMessage("Pickaxe can mine ore nodes and cavern blocks.");
   }
 
-    performHammerPrimary() {
+  performHatchetPrimary() {
+    const target = this.state.lookTarget;
+    if (!target) {
+      this.hud.pushMessage("Hatchet swings at empty air.");
+      return;
+    }
+
+    if (target.kind === "npc") {
+      this.hud.pushMessage("Hatchet is a harvesting tool. Use the knife in combat.");
+      return;
+    }
+
+    if (target.kind === "object" && target.object.type === ObjectType.WOODY_ROOT) {
+      this.world.removeObject(target.tileX, target.tileY);
+      this.addResource(ResourceId.WOODY_ROOT, 1, { trackCollection: true });
+      this.hud.pushMessage("Chopped woody roots (+1 wood).");
+      return;
+    }
+
+    if (target.kind === "object" && target.object.type === ObjectType.MUSHROOM) {
+      this.world.removeObject(target.tileX, target.tileY);
+      this.addResource(ResourceId.MUSHROOM, 1, { trackCollection: true });
+      this.hud.pushMessage("Harvested mushroom (+1 mushroom).");
+      return;
+    }
+
+    if (target.kind === "object" && target.object.type === ObjectType.PICKUP) {
+      this.hud.pushMessage("Move onto the pickup to collect it.");
+      return;
+    }
+
+    if (target.kind === "block") {
+      this.hud.pushMessage("Hatchet cannot mine stone blocks.");
+      return;
+    }
+
+    this.hud.pushMessage("Hatchet can harvest woody roots and mushrooms.");
+  }
+
+  performHammerPrimary() {
     return this.performBuildPlacement(this.state.selectedBuild);
   }
 
@@ -4727,163 +4764,3 @@ export class Game {
     this.hud.setWindowState(this.buildWindowState());
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

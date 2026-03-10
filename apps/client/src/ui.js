@@ -391,6 +391,7 @@ export class Hud {
     const toolNameById = {
       [ToolId.KNIFE]: "Knife",
       [ToolId.PICKAXE]: "Pickaxe",
+      [ToolId.HATCHET]: "Hatchet",
       [ToolId.HAMMER]: "Hammer",
     };
     const selectedAction = resolveActionItem(state.toolbarSlots?.[state.selectedSlot] ?? null);
