@@ -531,6 +531,9 @@ body {
 .recipe-list {
   display: grid;
   gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding-right: 2px;
 }
 
 .recipe-button {
@@ -564,6 +567,9 @@ body {
 .build-picker-list {
   display: grid;
   gap: 6px;
+  max-height: 340px;
+  overflow-y: auto;
+  padding-right: 2px;
 }
 
 .build-picker-btn {

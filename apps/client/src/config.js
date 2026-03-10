@@ -351,6 +351,14 @@ export const CRAFTING_RECIPES = Object.freeze([
     toolOutputs: { [ToolId.KNIFE]: 1 },
   },
   {
+    id: "hatchet-basic",
+    name: "Hatchet",
+    stations: [StationId.CONSTRUCTION_BENCH],
+    inputs: { [ResourceId.WOODY_ROOT]: 1, [ResourceId.IRON_INGOT]: 2 },
+    outputs: {},
+    toolOutputs: { [ToolId.HATCHET]: 1 },
+  },
+  {
     id: "pickaxe-basic",
     name: "Pickaxe",
     stations: [StationId.CONSTRUCTION_BENCH],
