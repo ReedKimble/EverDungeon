@@ -10,7 +10,9 @@ import {
   ToolId,
 } from "./config.js";
 
-const PLACEABLE_RESOURCE_IDS = new Set([ResourceId.STONE_BLOCK, ResourceId.WALL_KIT, ResourceId.DOOR_KIT]);
+const PLACEABLE_RESOURCE_IDS = new Set([ResourceId.STONE_BLOCK, ResourceId.WALL_KIT, ResourceId.DOOR_KIT, ResourceId.SMALL_CHEST]);
+const EVERDUNGEON_DND_MIME = "application/x-everdungeon";
+const EVERDUNGEON_DND_TEXT_PREFIX = "__everdungeon__:";
 
 function slotTemplate(keyLabel, slot) {
   const icon = slot?.icon ?? "--";
@@ -18,21 +20,52 @@ function slotTemplate(keyLabel, slot) {
   return `<span class="slot-key">${keyLabel}</span><span class="slot-icon">${icon}</span><span class="slot-name">${name}</span>`;
 }
 
-function payloadFromEvent(event) {
-  const raw = event.dataTransfer?.getData("application/x-everdungeon");
-  if (!raw) {
-    return null;
+function payloadFromEvent(event, fallbackPayload = null) {
+  const dataTransfer = event.dataTransfer;
+  if (!dataTransfer) {
+    return fallbackPayload;
   }
 
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
+  const parsePayload = (raw) => {
+    if (!raw) {
+      return null;
+    }
+
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  };
+
+  const customPayload = parsePayload(dataTransfer.getData(EVERDUNGEON_DND_MIME));
+  if (customPayload) {
+    return customPayload;
   }
+
+  const textPayload = dataTransfer.getData("text/plain");
+  if (textPayload?.startsWith(EVERDUNGEON_DND_TEXT_PREFIX)) {
+    return parsePayload(textPayload.slice(EVERDUNGEON_DND_TEXT_PREFIX.length));
+  }
+
+  const transferTypes = Array.from(dataTransfer.types ?? []);
+  if (transferTypes.length === 0) {
+    return fallbackPayload;
+  }
+
+  return null;
 }
 
 function setDragPayload(event, payload) {
-  event.dataTransfer?.setData("application/x-everdungeon", JSON.stringify(payload));
+  const dataTransfer = event.dataTransfer;
+  if (!dataTransfer) {
+    return;
+  }
+
+  const serialized = JSON.stringify(payload);
+  dataTransfer.setData(EVERDUNGEON_DND_MIME, serialized);
+  dataTransfer.setData("text/plain", `${EVERDUNGEON_DND_TEXT_PREFIX}${serialized}`);
+  dataTransfer.effectAllowed = "move";
 }
 
 function resolveActionItem(item) {
@@ -137,6 +170,9 @@ export class Hud {
     this.messageLog = [];
     this.windowSignature = "";
     this.effectsSignature = "";
+    this.activeDragPayload = null;
+    this.draggedWindow = null;
+    this.windowDragZ = 25;
 
     this.toolbarNodes = this.createActionStrip(this.toolbar, this.toolbarBindings, "toolbar");
     this.hotbarNodes = this.createActionStrip(this.hotbar, this.hotbarBindings, "hotbar");
@@ -180,6 +216,8 @@ export class Hud {
 
     this.wireInventoryDrop(this.playerInventory);
     this.wireInventoryDrop(this.objectInventory);
+    this.installDragDropGuards();
+    this.installWindowDragging();
   }
 
   emit(action) {
@@ -198,11 +236,17 @@ export class Hud {
 
       node.addEventListener("dragover", (event) => {
         event.preventDefault();
+        event.stopPropagation();
+        if (event.dataTransfer) {
+          event.dataTransfer.dropEffect = "move";
+        }
       });
 
       node.addEventListener("drop", (event) => {
         event.preventDefault();
-        const payload = payloadFromEvent(event);
+        event.stopPropagation();
+        const payload = payloadFromEvent(event, this.activeDragPayload);
+        this.activeDragPayload = null;
         if (!payload) {
           return;
         }
@@ -249,11 +293,17 @@ export class Hud {
   wireInventoryDrop(container) {
     container.addEventListener("dragover", (event) => {
       event.preventDefault();
+      event.stopPropagation();
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = "move";
+      }
     });
 
     container.addEventListener("drop", (event) => {
       event.preventDefault();
-      const payload = payloadFromEvent(event);
+      event.stopPropagation();
+      const payload = payloadFromEvent(event, this.activeDragPayload);
+      this.activeDragPayload = null;
       if (!payload) {
         return;
       }
@@ -286,6 +336,7 @@ export class Hud {
       node.classList.add("empty");
       node.draggable = false;
       node.ondragstart = null;
+      node.ondragend = null;
       return;
     }
 
@@ -295,12 +346,17 @@ export class Hud {
     node.classList.add("filled", `action-${slotView.actionType ?? "resource"}`);
     node.draggable = true;
     node.ondragstart = (event) => {
-      setDragPayload(event, {
+      const payload = {
         type: "action-slot-item",
         target,
         slotIndex,
         hotbarIndex: this.activeHotbarIndex,
-      });
+      };
+      this.activeDragPayload = payload;
+      setDragPayload(event, payload);
+    };
+    node.ondragend = () => {
+      this.activeDragPayload = null;
     };
   }
 
@@ -411,6 +467,9 @@ export class Hud {
       } else if (object.type === ObjectType.CONSTRUCTION_BENCH) {
         const ingredients = object.data.ingredients?.length ?? 0;
         targetText = `Target: Construction Workbench (${ingredients}/8)`;
+      } else if (object.type === ObjectType.SMALL_CHEST) {
+        const stored = object.data?.slots?.filter((item) => !!item).length ?? 0;
+        targetText = `Target: Small Chest (${stored}/12)`;
       } else if (object.type === ObjectType.WALL_SEGMENT) {
         targetText = "Target: Constructed Wall Segment";
       } else if (object.type === ObjectType.DOOR) {
@@ -420,7 +479,7 @@ export class Hud {
 
     this.status.innerHTML = [
       `<div>Area: <strong style="color: ${areaColor}">${areaName}</strong> (${areaRule})</div>`,
-      `<div>Resources: Cut Stone ${state.resources[ResourceId.STONE]} | Raw Stone ${state.resources[ResourceId.STONE_BLOCK]} | Wood ${state.resources[ResourceId.WOODY_ROOT]} | Mushroom ${state.resources[ResourceId.MUSHROOM]} | Meat ${state.resources[ResourceId.MEAT]} | Stew ${state.resources[ResourceId.SIMPLE_STEW]} | Wall Kit ${state.resources[ResourceId.WALL_KIT]} | Door ${state.resources[ResourceId.DOOR_KIT]}</div>`,
+      `<div>Resources: Cut Stone ${state.resources[ResourceId.STONE]} | Raw Stone ${state.resources[ResourceId.STONE_BLOCK]} | Wood ${state.resources[ResourceId.WOODY_ROOT]} | Mushroom ${state.resources[ResourceId.MUSHROOM]} | Meat ${state.resources[ResourceId.MEAT]} | Stew ${state.resources[ResourceId.SIMPLE_STEW]} | Chest ${state.resources[ResourceId.SMALL_CHEST]} | Wall Kit ${state.resources[ResourceId.WALL_KIT]} | Door ${state.resources[ResourceId.DOOR_KIT]}</div>`,
       `<div>Ores: Cu ${state.resources[ResourceId.COPPER_ORE]} | Zn ${state.resources[ResourceId.ZINC_ORE]} | Fe ${state.resources[ResourceId.IRON_ORE]} | Ingots: Cu ${state.resources[ResourceId.COPPER_INGOT]} | Zn ${state.resources[ResourceId.ZINC_INGOT]} | Fe ${state.resources[ResourceId.IRON_INGOT]}</div>`,
       `<div>Coins: Cu ${state.resources[ResourceId.COPPER_COIN]} | Ag ${state.resources[ResourceId.SILVER_COIN]} | Au ${state.resources[ResourceId.GOLD_COIN]}</div>`,
       `<div>HP: ${Math.ceil(state.player.health)}/${state.player.maxHealth} | Kills: ${state.combat?.kills ?? 0} | Hostiles: ${hostileCount}</div>`,
@@ -571,13 +630,18 @@ export class Hud {
         slot.innerHTML = `<span class="res-symbol">${slotData.icon}</span><span class="res-count">${countText}</span><span class="res-name">${slotData.label}</span><span class="inventory-slot-index">${i + 1}</span>`;
         slot.draggable = true;
         slot.addEventListener("dragstart", (event) => {
-          setDragPayload(event, {
+          const payload = {
             type: "inventory-item",
             item: {
               kind: slotData.itemKind,
               id: slotData.itemId,
             },
-          });
+          };
+          this.activeDragPayload = payload;
+          setDragPayload(event, payload);
+        });
+        slot.addEventListener("dragend", () => {
+          this.activeDragPayload = null;
         });
       }
 
@@ -600,11 +664,17 @@ export class Hud {
 
       slot.addEventListener("dragover", (event) => {
         event.preventDefault();
+        event.stopPropagation();
+        if (event.dataTransfer) {
+          event.dataTransfer.dropEffect = "move";
+        }
       });
 
       slot.addEventListener("drop", (event) => {
         event.preventDefault();
-        const payload = payloadFromEvent(event);
+        event.stopPropagation();
+        const payload = payloadFromEvent(event, this.activeDragPayload);
+        this.activeDragPayload = null;
         if (!payload) {
           return;
         }
@@ -637,12 +707,17 @@ export class Hud {
       if (resourceDef) {
         slot.draggable = true;
         slot.addEventListener("dragstart", (event) => {
-          setDragPayload(event, {
+          const payload = {
             type: "slot-resource",
             contextId: context.contextId,
             slotIndex: i,
             resourceId,
-          });
+          };
+          this.activeDragPayload = payload;
+          setDragPayload(event, payload);
+        });
+        slot.addEventListener("dragend", () => {
+          this.activeDragPayload = null;
         });
 
         slot.addEventListener("click", () => {
@@ -723,6 +798,119 @@ export class Hud {
     }
   }
 
+  installDragDropGuards() {
+    const suppressBrowserDrop = (event) => {
+      event.preventDefault();
+    };
+
+    document.addEventListener("dragover", suppressBrowserDrop, { capture: true });
+    document.addEventListener("drop", suppressBrowserDrop, { capture: true });
+    document.addEventListener(
+      "dragend",
+      () => {
+        this.activeDragPayload = null;
+      },
+      { capture: true },
+    );
+  }
+
+  bringWindowToFront(windowNode) {
+    if (!windowNode) {
+      return;
+    }
+
+    this.windowDragZ += 1;
+    windowNode.style.zIndex = String(this.windowDragZ);
+  }
+
+  beginWindowDrag(windowNode, event) {
+    if (!windowNode) {
+      return;
+    }
+
+    const rect = windowNode.getBoundingClientRect();
+    windowNode.style.left = `${rect.left}px`;
+    windowNode.style.top = `${rect.top}px`;
+    windowNode.style.right = "auto";
+    windowNode.style.bottom = "auto";
+    this.bringWindowToFront(windowNode);
+
+    this.draggedWindow = {
+      id: windowNode.id,
+      pointerId: event.pointerId,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+    };
+  }
+
+  updateWindowDrag(event) {
+    if (!this.draggedWindow || event.pointerId !== this.draggedWindow.pointerId) {
+      return;
+    }
+
+    const windowNode = document.getElementById(this.draggedWindow.id);
+    if (!windowNode) {
+      this.draggedWindow = null;
+      return;
+    }
+
+    const rect = windowNode.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const nextLeft = event.clientX - this.draggedWindow.offsetX;
+    const nextTop = event.clientY - this.draggedWindow.offsetY;
+    const clampedLeft = Math.max(0, Math.min(nextLeft, viewportWidth - rect.width));
+    const clampedTop = Math.max(0, Math.min(nextTop, viewportHeight - rect.height));
+
+    windowNode.style.left = `${clampedLeft}px`;
+    windowNode.style.top = `${clampedTop}px`;
+  }
+
+  endWindowDrag(event) {
+    if (!this.draggedWindow) {
+      return;
+    }
+
+    if (event && event.pointerId !== this.draggedWindow.pointerId) {
+      return;
+    }
+
+    this.draggedWindow = null;
+  }
+
+  installWindowDragging() {
+    const windows = [this.playerWindow, this.objectWindow, this.hammerWindow, this.questWindow].filter(Boolean);
+
+    for (const windowNode of windows) {
+      const header = windowNode.querySelector(".window-header");
+      if (!header) {
+        continue;
+      }
+
+      header.addEventListener("pointerdown", (event) => {
+        if (event.button !== 0) {
+          return;
+        }
+
+        if (event.target.closest(".window-close")) {
+          return;
+        }
+
+        event.preventDefault();
+        this.beginWindowDrag(windowNode, event);
+      });
+    }
+
+    document.addEventListener("pointermove", (event) => {
+      this.updateWindowDrag(event);
+    });
+    document.addEventListener("pointerup", (event) => {
+      this.endWindowDrag(event);
+    });
+    document.addEventListener("pointercancel", (event) => {
+      this.endWindowDrag(event);
+    });
+  }
   setWindowState(windowState) {
     const signature = JSON.stringify(windowState);
     if (signature === this.windowSignature) {
@@ -771,9 +959,3 @@ export class Hud {
     }
   }
 }
-
-
-
-
-
-

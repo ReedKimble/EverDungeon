@@ -759,6 +759,7 @@ function benchModelParts(object, highlighted) {
   const baseX = object.tileX + 0.5;
   const baseY = object.tileY + 0.5;
 
+
   if (object.type === ObjectType.DOOR) {
     const axis = object.data?.axis === "y" ? "y" : "x";
     const open = !!object.data?.open;
@@ -807,6 +808,32 @@ function benchModelParts(object, highlighted) {
         color: highlighted ? "#d5e4ee" : "#afc1ce",
         pos: { x: baseX, y: baseY, z: 0.68 },
         size: { x: beamWidth, y: beamHeight, z: 0.08 },
+        rot: { x: 0, y: 0, z: 0 },
+      },
+    ];
+  }
+
+  if (object.type === ObjectType.SMALL_CHEST) {
+    const bodyColor = highlighted ? "#a08058" : "#8b6b46";
+    const lidColor = highlighted ? "#c9ae83" : "#b69668";
+    const trimColor = highlighted ? "#d9c8a4" : "#c2ad82";
+    return [
+      {
+        color: bodyColor,
+        pos: { x: baseX, y: baseY, z: 0.17 },
+        size: { x: 0.56, y: 0.4, z: 0.2 },
+        rot: { x: 0, y: 0, z: 0 },
+      },
+      {
+        color: lidColor,
+        pos: { x: baseX, y: baseY, z: 0.32 },
+        size: { x: 0.62, y: 0.44, z: 0.09 },
+        rot: { x: 0, y: 0, z: 0 },
+      },
+      {
+        color: trimColor,
+        pos: { x: baseX + 0.22, y: baseY, z: 0.17 },
+        size: { x: 0.04, y: 0.16, z: 0.12 },
         rot: { x: 0, y: 0, z: 0 },
       },
     ];
@@ -1422,6 +1449,7 @@ export class Renderer {
         object.type !== ObjectType.SMELTER &&
         object.type !== ObjectType.CONSTRUCTION_BENCH &&
         object.type !== ObjectType.STOVE &&
+        object.type !== ObjectType.SMALL_CHEST &&
         object.type !== ObjectType.DOOR
       ) {
         return;
@@ -1488,6 +1516,7 @@ export class Renderer {
         object.type === ObjectType.SMELTER ||
         object.type === ObjectType.CONSTRUCTION_BENCH ||
         object.type === ObjectType.STOVE ||
+        object.type === ObjectType.SMALL_CHEST ||
         object.type === ObjectType.DOOR
       ) {
         return;
@@ -1996,6 +2025,12 @@ export class Renderer {
 
       if (object.type === ObjectType.CONSTRUCTION_BENCH) {
         ctx.fillStyle = "#77b6cb";
+        ctx.fillRect(mapX, mapY, 4, 4);
+        return;
+      }
+
+      if (object.type === ObjectType.SMALL_CHEST) {
+        ctx.fillStyle = "#b79466";
         ctx.fillRect(mapX, mapY, 4, 4);
         return;
       }

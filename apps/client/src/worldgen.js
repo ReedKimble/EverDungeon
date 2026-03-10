@@ -20,6 +20,7 @@ const WALL_CONNECTION_S = 4;
 const WALL_CONNECTION_W = 8;
 const WALL_SEGMENT_THICKNESS = 0.24;
 const BENCH_HALF_EXTENT = 0.34;
+const CHEST_HALF_EXTENT = 0.3;
 const DOOR_HALF_LENGTH = 0.34;
 const DOOR_HALF_THICKNESS = 0.06;
 
@@ -657,6 +658,13 @@ export function createWorld(seed) {
       return centeredY <= DOOR_HALF_LENGTH && centeredX <= DOOR_HALF_THICKNESS;
     }
 
+    if (object.type === ObjectType.SMALL_CHEST) {
+      return (
+        Math.abs(localX - 0.5) <= CHEST_HALF_EXTENT &&
+        Math.abs(localY - 0.5) <= CHEST_HALF_EXTENT
+      );
+    }
+
     if (
       object.type === ObjectType.SMELTER ||
       object.type === ObjectType.STONE_CUTTER ||
@@ -870,6 +878,9 @@ export function createWorld(seed) {
     ) {
       objectData.ingredients = [];
     }
+    if (type === ObjectType.SMALL_CHEST && !Array.isArray(objectData.slots)) {
+      objectData.slots = Array(12).fill(null);
+    }
     if (type === ObjectType.WALL_SEGMENT && typeof objectData.connections !== "number") {
       objectData.connections = 0;
     }
@@ -890,6 +901,7 @@ export function createWorld(seed) {
         type === ObjectType.STONE_CUTTER ||
         type === ObjectType.CONSTRUCTION_BENCH ||
         type === ObjectType.STOVE ||
+        type === ObjectType.SMALL_CHEST ||
         type === ObjectType.WALL_SEGMENT ||
         (type === ObjectType.DOOR && !objectData.open),
       blocksVision: type === ObjectType.WALL_SEGMENT || (type === ObjectType.DOOR && !objectData.open),
@@ -1000,3 +1012,5 @@ export function createWorld(seed) {
     isCavernTile,
   };
 }
+
+

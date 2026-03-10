@@ -142,6 +142,30 @@ function consumeSlotInputs(slots, recipeInputs) {
   }
 }
 
+function countEmptySlots(slots) {
+  let empty = 0;
+  for (const slot of slots) {
+    if (!slot) {
+      empty += 1;
+    }
+  }
+  return empty;
+}
+
+function addResourceToSlots(slots, resourceId, amount) {
+  let remaining = amount;
+  for (let i = 0; i < slots.length && remaining > 0; i += 1) {
+    if (slots[i]) {
+      continue;
+    }
+
+    slots[i] = resourceId;
+    remaining -= 1;
+  }
+
+  return remaining === 0;
+}
+
 const PLAYER_MAX_HEALTH = 100;
 const KNIFE_REACH = 1.35;
 const KNIFE_RANGE_RADIUS_FACTOR = 0.38;
@@ -175,6 +199,11 @@ const GOBLIN_TUNNEL_SPAWN_POINTS_MAX = 14;
 const GOBLIN_SPAWN_ACTIVATION_RADIUS = 56;
 const GOBLIN_RESPAWN_COOLDOWN_MIN = 600;
 const GOBLIN_RESPAWN_COOLDOWN_MAX = 1200;
+const SMALL_CHEST_SLOT_COUNT = 12;
+const ALLIED_AUTOCRAFT_INTERVAL = 3.8;
+const ALLIED_GATHER_STACK_TARGET = 10;
+const ALLIED_ROOM_HEAL_RATE = 1.6;
+const ALLIED_RETREAT_HEALTH_RATIO = 0.5;
 const TOOL_SWING_STAMINA_COST = Object.freeze({
   [ToolId.KNIFE]: 8,
   [ToolId.PICKAXE]: 12,
@@ -191,6 +220,7 @@ const PLACEABLE_RESOURCE_TO_BUILD = Object.freeze({
   [ResourceId.STONE_BLOCK]: BuildId.STONE_BLOCK,
   [ResourceId.WALL_KIT]: BuildId.WALL_SEGMENT,
   [ResourceId.DOOR_KIT]: BuildId.DOOR,
+  [ResourceId.SMALL_CHEST]: BuildId.SMALL_CHEST,
 });
 const CONSUMABLE_RESOURCE_IDS = new Set([ResourceId.SIMPLE_STEW]);
 const DEFAULT_TOOLBAR_LOADOUT = Object.freeze([
@@ -243,6 +273,55 @@ const GOBLIN_QUEST_COLLECTION_RESOURCES = Object.freeze([
   ResourceId.IRON_ORE,
 ]);
 const GOBLIN_QUEST_KILL_TARGETS = Object.freeze(["golem"]);
+const ALLIED_GATHERABLE_RESOURCES = new Set([
+  ResourceId.STONE_BLOCK,
+  ResourceId.WOODY_ROOT,
+  ResourceId.MUSHROOM,
+  ResourceId.COPPER_ORE,
+  ResourceId.ZINC_ORE,
+  ResourceId.IRON_ORE,
+]);
+const RESOURCE_TO_REQUIRED_TOOL = Object.freeze({
+  [ResourceId.STONE_BLOCK]: ToolId.PICKAXE,
+  [ResourceId.WOODY_ROOT]: ToolId.PICKAXE,
+  [ResourceId.MUSHROOM]: ToolId.PICKAXE,
+  [ResourceId.COPPER_ORE]: ToolId.PICKAXE,
+  [ResourceId.ZINC_ORE]: ToolId.PICKAXE,
+  [ResourceId.IRON_ORE]: ToolId.PICKAXE,
+});
+
+const STATION_OBJECT_TYPES = Object.freeze({
+  [StationId.STONE_CUTTER]: ObjectType.STONE_CUTTER,
+  [StationId.SMELTER]: ObjectType.SMELTER,
+  [StationId.STOVE]: ObjectType.STOVE,
+  [StationId.CONSTRUCTION_BENCH]: ObjectType.CONSTRUCTION_BENCH,
+});
+
+const CRAFTING_OBJECT_TYPES = new Set([
+  ObjectType.STONE_CUTTER,
+  ObjectType.SMELTER,
+  ObjectType.STOVE,
+  ObjectType.CONSTRUCTION_BENCH,
+]);
+
+function stationIdForObjectType(objectType) {
+  if (objectType === ObjectType.STONE_CUTTER) {
+    return StationId.STONE_CUTTER;
+  }
+  if (objectType === ObjectType.SMELTER) {
+    return StationId.SMELTER;
+  }
+  if (objectType === ObjectType.STOVE) {
+    return StationId.STOVE;
+  }
+  if (objectType === ObjectType.CONSTRUCTION_BENCH) {
+    return StationId.CONSTRUCTION_BENCH;
+  }
+  if (objectType === ObjectType.SMALL_CHEST) {
+    return StationId.STORAGE;
+  }
+  return null;
+}
 const GOBLIN_QUEST_COMPLETION_RATIO = 0.6;
 const GOBLIN_MAX_QUEST_STEPS = 6;
 const NPC_LOOT_TABLES = Object.freeze({
@@ -500,7 +579,8 @@ function createNpcEntity(id, kind, x, y, profile, level, rngSeedA, rngSeedB) {
     provoked: profile.provoked,
     touchAggroDistance: profile.touchAggroDistance ?? 0,
     followDistance: profile.followDistance ?? 1.8,
-    settleDistance: profile.settleDistance ?? 2.4,    settled: false,
+    settleDistance: profile.settleDistance ?? 2.4,
+    settled: false,
     homeTileX: null,
     homeTileY: null,
     homeDoorTileX: null,
@@ -510,6 +590,19 @@ function createNpcEntity(id, kind, x, y, profile, level, rngSeedA, rngSeedB) {
     wanderCooldown: 0,
     quest: null,
     questChainLength: kind === "goblin" ? deriveGoblinQuestChainLength(stats, level) : 0,
+    toolInventory: [],
+    desiredCraftRecipeId: null,
+    autoCraftCooldown: 0,
+    gatherResourceId: null,
+    gatheredCount: 0,
+    gatherTargetCount: ALLIED_GATHER_STACK_TARGET,
+    gatherTargetTileX: null,
+    gatherTargetTileY: null,
+    gatherTargetObjectId: null,
+    gatherStandTileX: null,
+    gatherStandTileY: null,
+    gatherActionCooldown: 0,
+    recovering: false,
   };
 }
 
@@ -626,6 +719,22 @@ function resourceString(resources) {
     .join(" + ");
 }
 
+function toolOutputString(toolOutputs = {}) {
+  return Object.entries(toolOutputs)
+    .filter(([, amount]) => amount > 0)
+    .map(([toolId, amount]) => `${TOOL_DEFINITIONS[toolId]?.icon ?? toolId.toUpperCase()} ${amount}`)
+    .join(" + ");
+}
+
+function recipeOutputString(recipe) {
+  const resourceOutputs = resourceString(recipe.outputs ?? {});
+  const toolOutputs = toolOutputString(recipe.toolOutputs ?? {});
+  if (resourceOutputs && toolOutputs) {
+    return `${resourceOutputs} + ${toolOutputs}`;
+  }
+
+  return resourceOutputs || toolOutputs || "None";
+}
 function cloneLoadoutItem(item) {
   if (!item) {
     return null;
@@ -721,6 +830,7 @@ export class Game {
         [ResourceId.MUSHROOM]: 0,
         [ResourceId.MEAT]: 0,
         [ResourceId.SIMPLE_STEW]: 0,
+        [ResourceId.SMALL_CHEST]: 0,
         [ResourceId.WALL_KIT]: 0,
         [ResourceId.DOOR_KIT]: 0,
       },
@@ -732,6 +842,11 @@ export class Game {
         (_, index) => createLoadoutSlots(index === 0 ? DEFAULT_HOTBAR_LOADOUT : [], HOTBAR_BINDINGS.length),
       ),
       activeHotbarIndex: 0,
+      ownedTools: {
+        [ToolId.KNIFE]: true,
+        [ToolId.PICKAXE]: true,
+        [ToolId.HAMMER]: true,
+      },
       selectedSlot: 0,
       selectedTool: ToolId.KNIFE,
       selectedBuild: BuildId.STONE_BLOCK,
@@ -928,6 +1043,7 @@ export class Game {
       npc.attackCooldown = Math.max(0, (npc.attackCooldown ?? 0) - dt);
       npc.attackAnim = Math.max(0, (npc.attackAnim ?? 0) - dt);
       npc.walkAmount = Math.max(0, (npc.walkAmount ?? 0) - dt * 4.8);
+      npc.gatherActionCooldown = Math.max(0, (npc.gatherActionCooldown ?? 0) - dt);
 
       if (!npc.alive) {
         npc.deathTimer = Math.max(0, (npc.deathTimer ?? 0) - dt);
@@ -1031,27 +1147,7 @@ export class Game {
       const followDistance = npc.followDistance ?? 1.8;
 
       if (distance > followDistance) {
-        const invDistance = distance > 0.0001 ? 1 / distance : 0;
-        const step = npc.speed * dt;
-        const moveX = dx * invDistance * step;
-        const moveY = dy * invDistance * step;
-        const prevX = npc.x;
-        const prevY = npc.y;
-        const nextX = npc.x + moveX;
-        const nextY = npc.y + moveY;
-
-        if (canOccupy(this.world, nextX, npc.y, npc.radius, this.state.npcs, npc.id)) {
-          npc.x = nextX;
-        }
-        if (canOccupy(this.world, npc.x, nextY, npc.radius, this.state.npcs, npc.id)) {
-          npc.y = nextY;
-        }
-
-        const moved = Math.hypot(npc.x - prevX, npc.y - prevY);
-        if (moved > 0.0003) {
-          npc.walkCycle = (npc.walkCycle ?? 0) + moved * 14;
-          npc.walkAmount = Math.min(1, (npc.walkAmount ?? 0) + dt * 8);
-        }
+        this.moveNpcToward(npc, player.x, player.y, dt, 1);
       }
 
       const settleDistance = npc.settleDistance ?? 2.4;
@@ -1068,6 +1164,8 @@ export class Game {
             npc.wanderTargetTileX = null;
             npc.wanderTargetTileY = null;
             npc.wanderCooldown = 1.2 + Math.random() * 1.4;
+            npc.autoCraftCooldown = 0;
+            npc.recovering = false;
 
             const settleX = settlement.tileX + 0.5;
             const settleY = settlement.tileY + 0.5;
@@ -1087,6 +1185,39 @@ export class Game {
     const homeTileY = npc.homeTileY ?? Math.floor(npc.y);
     const homeX = homeTileX + 0.5;
     const homeY = homeTileY + 0.5;
+    const homeDx = homeX - npc.x;
+    const homeDy = homeY - npc.y;
+    const homeDistance = Math.hypot(homeDx, homeDy);
+
+    const room = this.getSettledNpcRoom(npc);
+    if (room) {
+      const tileX = Math.floor(npc.x);
+      const tileY = Math.floor(npc.y);
+      const insideRoom = tileX > room.minX && tileX < room.maxX && tileY > room.minY && tileY < room.maxY;
+      if (insideRoom && npc.health < npc.maxHealth) {
+        npc.health = Math.min(npc.maxHealth, npc.health + ALLIED_ROOM_HEAL_RATE * dt);
+      }
+    }
+
+    if (npc.gatherResourceId) {
+      const gathering = this.updateAlliedGatherTask(npc, dt);
+      if (gathering) {
+        return;
+      }
+    }
+
+    this.updateAlliedAutoCraft(npc, dt);
+
+    if (npc.recovering) {
+      if (homeDistance > 0.42) {
+        this.moveNpcToward(npc, homeX, homeY, dt, 0.85);
+        return;
+      }
+
+      if (npc.health >= npc.maxHealth * 0.9) {
+        npc.recovering = false;
+      }
+    }
 
     npc.wanderCooldown = Math.max(0, (npc.wanderCooldown ?? 0) - dt);
 
@@ -1111,41 +1242,16 @@ export class Game {
     const travelTileY = npc.wanderTargetTileY ?? homeTileY;
     const targetX = travelTileX + 0.5;
     const targetY = travelTileY + 0.5;
-    const targetDx = targetX - npc.x;
-    const targetDy = targetY - npc.y;
-    const targetDistance = Math.hypot(targetDx, targetDy);
+    const targetDistance = Math.hypot(targetX - npc.x, targetY - npc.y);
 
     if (targetDistance > 0.08) {
-      const invDistance = targetDistance > 0.0001 ? 1 / targetDistance : 0;
-      const step = Math.min(targetDistance, npc.speed * dt * 0.45);
-      const moveX = targetDx * invDistance * step;
-      const moveY = targetDy * invDistance * step;
-      const prevX = npc.x;
-      const prevY = npc.y;
-      const nextX = npc.x + moveX;
-      const nextY = npc.y + moveY;
-
-      if (canOccupy(this.world, nextX, npc.y, npc.radius, this.state.npcs, npc.id)) {
-        npc.x = nextX;
-      }
-      if (canOccupy(this.world, npc.x, nextY, npc.radius, this.state.npcs, npc.id)) {
-        npc.y = nextY;
-      }
-
-      const moved = Math.hypot(npc.x - prevX, npc.y - prevY);
-      if (moved > 0.0002) {
-        npc.walkCycle = (npc.walkCycle ?? 0) + moved * 10;
-        npc.walkAmount = Math.min(1, (npc.walkAmount ?? 0) + dt * 6);
-      }
+      this.moveNpcToward(npc, targetX, targetY, dt, 0.45);
     } else if (npc.wanderTargetTileX != null && npc.wanderTargetTileY != null) {
       npc.wanderTargetTileX = null;
       npc.wanderTargetTileY = null;
       npc.wanderCooldown = 1.5 + Math.random() * 3.5;
     }
 
-    const homeDx = homeX - npc.x;
-    const homeDy = homeY - npc.y;
-    const homeDistance = Math.hypot(homeDx, homeDy);
     if (homeDistance > 3.8) {
       npc.wanderTargetTileX = homeTileX;
       npc.wanderTargetTileY = homeTileY;
@@ -1375,6 +1481,512 @@ export class Game {
     }
 
     return { tileX: homeTileX, tileY: homeTileY };
+  }
+
+
+  clearNpcGatherTask(npc) {
+    npc.gatherResourceId = null;
+    npc.gatheredCount = 0;
+    npc.gatherTargetTileX = null;
+    npc.gatherTargetTileY = null;
+    npc.gatherTargetObjectId = null;
+    npc.gatherStandTileX = null;
+    npc.gatherStandTileY = null;
+    npc.gatherActionCooldown = 0;
+  }
+
+  moveNpcToward(npc, targetX, targetY, dt, speedScale = 1) {
+    const dx = targetX - npc.x;
+    const dy = targetY - npc.y;
+    const distance = Math.hypot(dx, dy);
+    if (distance <= 0.001) {
+      return 0;
+    }
+
+    const step = Math.min(distance, npc.speed * dt * speedScale);
+    const invDistance = distance > 0.0001 ? 1 / distance : 0;
+    const moveX = dx * invDistance * step;
+    const moveY = dy * invDistance * step;
+    const prevX = npc.x;
+    const prevY = npc.y;
+    const nextX = npc.x + moveX;
+    const nextY = npc.y + moveY;
+
+    if (canOccupy(this.world, nextX, npc.y, npc.radius, this.state.npcs, npc.id)) {
+      npc.x = nextX;
+    }
+    if (canOccupy(this.world, npc.x, nextY, npc.radius, this.state.npcs, npc.id)) {
+      npc.y = nextY;
+    }
+
+    const moved = Math.hypot(npc.x - prevX, npc.y - prevY);
+    if (moved > 0.0002) {
+      npc.walkCycle = (npc.walkCycle ?? 0) + moved * 14;
+      npc.walkAmount = Math.min(1, (npc.walkAmount ?? 0) + dt * 8);
+    }
+    return moved;
+  }
+
+  getSettledNpcRoom(npc) {
+    if (!npc?.settled) {
+      return null;
+    }
+
+    const tileX = npc.homeTileX ?? Math.floor(npc.x);
+    const tileY = npc.homeTileY ?? Math.floor(npc.y);
+    return this.getConstructedRoomAt(tileX, tileY);
+  }
+
+  findRoomSupportObjects(room) {
+    const support = {
+      chest: null,
+      workbenches: [],
+    };
+
+    if (!room) {
+      return support;
+    }
+
+    for (let y = room.minY + 1; y <= room.maxY - 1; y += 1) {
+      for (let x = room.minX + 1; x <= room.maxX - 1; x += 1) {
+        const object = this.world.getObject(x, y);
+        if (!object) {
+          continue;
+        }
+
+        if (object.type === ObjectType.SMALL_CHEST && !support.chest) {
+          support.chest = object;
+        }
+
+        if (CRAFTING_OBJECT_TYPES.has(object.type)) {
+          support.workbenches.push(object);
+        }
+      }
+    }
+
+    return support;
+  }
+
+  findRecipeForHeldAction(heldView) {
+    if (!heldView) {
+      return null;
+    }
+
+    for (const recipe of CRAFTING_RECIPES) {
+      if (!recipe.stations.some((stationId) => !!STATION_OBJECT_TYPES[stationId])) {
+        continue;
+      }
+
+      if (heldView.itemKind === ACTION_ITEM_KIND.RESOURCE && (recipe.outputs?.[heldView.itemId] ?? 0) > 0) {
+        return recipe;
+      }
+
+      if (heldView.itemKind === ACTION_ITEM_KIND.TOOL && (recipe.toolOutputs?.[heldView.itemId] ?? 0) > 0) {
+        return recipe;
+      }
+    }
+
+    return null;
+  }
+
+  setAlliedCraftObjective(npc, recipe) {
+    if (!npc || !recipe) {
+      return false;
+    }
+
+    npc.desiredCraftRecipeId = recipe.id;
+    npc.autoCraftCooldown = 0;
+    this.hud.pushMessage(`${npcDisplayName(npc)} will craft ${recipe.name} when their room has a matching bench and stocked chest.`);
+    return true;
+  }
+
+  setAlliedGatherObjective(npc, resourceId) {
+    if (!ALLIED_GATHERABLE_RESOURCES.has(resourceId)) {
+      return false;
+    }
+
+    const requiredTool = RESOURCE_TO_REQUIRED_TOOL[resourceId];
+    if (requiredTool && !this.npcHasTool(npc, requiredTool)) {
+      const toolLabel = TOOL_DEFINITIONS[requiredTool]?.label ?? requiredTool;
+      this.hud.pushMessage(`${npcDisplayName(npc)} needs a ${toolLabel} to gather that resource.`);
+      return false;
+    }
+
+    npc.gatherResourceId = resourceId;
+    npc.gatheredCount = 0;
+    npc.gatherTargetCount = ALLIED_GATHER_STACK_TARGET;
+    npc.gatherTargetTileX = null;
+    npc.gatherTargetTileY = null;
+    npc.gatherTargetObjectId = null;
+    npc.gatherStandTileX = null;
+    npc.gatherStandTileY = null;
+    npc.gatherActionCooldown = 0;
+    npc.recovering = false;
+
+    const label = RESOURCE_DEFINITIONS[resourceId]?.label ?? resourceId;
+    this.hud.pushMessage(`${npcDisplayName(npc)} will gather ${label} until stack ${ALLIED_GATHER_STACK_TARGET} or heavy injury.`);
+    return true;
+  }
+
+  pickGatherStandTile(targetTileX, targetTileY, npc, allowCenter = true) {
+    const offsets = [];
+    if (allowCenter) {
+      offsets.push([0, 0]);
+    }
+    offsets.push([1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]);
+
+    for (const [ox, oy] of offsets) {
+      const tileX = targetTileX + ox;
+      const tileY = targetTileY + oy;
+      if (!this.world.inTileBounds(tileX, tileY)) {
+        continue;
+      }
+
+      if (!this.world.isWalkableTile(tileX, tileY)) {
+        continue;
+      }
+
+      const standX = tileX + 0.5;
+      const standY = tileY + 0.5;
+      if (!canOccupy(this.world, standX, standY, npc.radius, this.state.npcs, npc.id)) {
+        continue;
+      }
+
+      return { tileX, tileY };
+    }
+
+    return null;
+  }
+
+  isValidGatherTarget(npc, resourceId) {
+    if (!Number.isFinite(npc.gatherTargetTileX) || !Number.isFinite(npc.gatherTargetTileY)) {
+      return false;
+    }
+
+    const tileX = npc.gatherTargetTileX;
+    const tileY = npc.gatherTargetTileY;
+
+    if (resourceId === ResourceId.STONE_BLOCK) {
+      return (
+        this.world.getTile(tileX, tileY) === TileType.WALL &&
+        this.world.chunkTypeAtTile(tileX, tileY) === ChunkType.CAVERN
+      );
+    }
+
+    const object = Number.isFinite(npc.gatherTargetObjectId)
+      ? this.world.getObjectById(npc.gatherTargetObjectId)
+      : this.world.getObject(tileX, tileY);
+    if (!object || object.tileX !== tileX || object.tileY !== tileY) {
+      return false;
+    }
+
+    if (resourceId === ResourceId.WOODY_ROOT) {
+      return object.type === ObjectType.WOODY_ROOT;
+    }
+    if (resourceId === ResourceId.MUSHROOM) {
+      return object.type === ObjectType.MUSHROOM;
+    }
+    if (
+      resourceId === ResourceId.COPPER_ORE ||
+      resourceId === ResourceId.ZINC_ORE ||
+      resourceId === ResourceId.IRON_ORE
+    ) {
+      return object.type === ObjectType.ORE_NODE && (object.data?.resourceId ?? ResourceId.COPPER_ORE) === resourceId;
+    }
+
+    return false;
+  }
+
+  findNpcGatherTarget(npc, resourceId, radius = 22) {
+    const centerTileX = Math.floor(npc.x);
+    const centerTileY = Math.floor(npc.y);
+    let best = null;
+
+    const consider = (candidate) => {
+      const dx = candidate.tileX + 0.5 - npc.x;
+      const dy = candidate.tileY + 0.5 - npc.y;
+      const distSq = dx * dx + dy * dy;
+      if (!best || distSq < best.distSq) {
+        best = {
+          ...candidate,
+          distSq,
+        };
+      }
+    };
+
+    if (resourceId === ResourceId.STONE_BLOCK) {
+      for (let oy = -radius; oy <= radius; oy += 1) {
+        for (let ox = -radius; ox <= radius; ox += 1) {
+          const tileX = centerTileX + ox;
+          const tileY = centerTileY + oy;
+          if (!this.world.inTileBounds(tileX, tileY)) {
+            continue;
+          }
+
+          if (this.world.getTile(tileX, tileY) !== TileType.WALL) {
+            continue;
+          }
+
+          if (this.world.chunkTypeAtTile(tileX, tileY) !== ChunkType.CAVERN) {
+            continue;
+          }
+
+          const stand = this.pickGatherStandTile(tileX, tileY, npc, false);
+          if (!stand) {
+            continue;
+          }
+
+          consider({
+            kind: "block",
+            tileX,
+            tileY,
+            objectId: null,
+            standTileX: stand.tileX,
+            standTileY: stand.tileY,
+          });
+        }
+      }
+
+      return best;
+    }
+
+    this.world.forEachObjectNear(centerTileX, centerTileY, radius, (object) => {
+      let match = false;
+      if (resourceId === ResourceId.WOODY_ROOT) {
+        match = object.type === ObjectType.WOODY_ROOT;
+      } else if (resourceId === ResourceId.MUSHROOM) {
+        match = object.type === ObjectType.MUSHROOM;
+      } else if (
+        resourceId === ResourceId.COPPER_ORE ||
+        resourceId === ResourceId.ZINC_ORE ||
+        resourceId === ResourceId.IRON_ORE
+      ) {
+        match = object.type === ObjectType.ORE_NODE && (object.data?.resourceId ?? ResourceId.COPPER_ORE) === resourceId;
+      }
+
+      if (!match) {
+        return;
+      }
+
+      const stand = this.pickGatherStandTile(object.tileX, object.tileY, npc, true);
+      if (!stand) {
+        return;
+      }
+
+      consider({
+        kind: "object",
+        tileX: object.tileX,
+        tileY: object.tileY,
+        objectId: object.id,
+        standTileX: stand.tileX,
+        standTileY: stand.tileY,
+      });
+    });
+
+    return best;
+  }
+
+  tryHarvestNpcGatherTarget(npc) {
+    const resourceId = npc.gatherResourceId;
+    if (!resourceId || !this.isValidGatherTarget(npc, resourceId)) {
+      return false;
+    }
+
+    const tileX = npc.gatherTargetTileX;
+    const tileY = npc.gatherTargetTileY;
+
+    if (resourceId === ResourceId.STONE_BLOCK) {
+      this.world.setTile(tileX, tileY, TileType.FLOOR);
+      this.addResource(ResourceId.STONE_BLOCK, 1, { trackCollection: true });
+      return true;
+    }
+
+    const removed = this.world.removeObject(tileX, tileY);
+    if (!removed) {
+      return false;
+    }
+
+    this.addResource(resourceId, 1, { trackCollection: true });
+    return true;
+  }
+
+  updateAlliedGatherTask(npc, dt) {
+    if (!npc.gatherResourceId) {
+      return false;
+    }
+
+    const requiredTool = RESOURCE_TO_REQUIRED_TOOL[npc.gatherResourceId];
+    if (requiredTool && !this.npcHasTool(npc, requiredTool)) {
+      const toolLabel = TOOL_DEFINITIONS[requiredTool]?.label ?? requiredTool;
+      this.hud.pushMessage(`${npcDisplayName(npc)} stopped gathering: missing ${toolLabel}.`);
+      this.clearNpcGatherTask(npc);
+      return false;
+    }
+
+    if (npc.health <= npc.maxHealth * ALLIED_RETREAT_HEALTH_RATIO) {
+      if (!npc.recovering) {
+        this.hud.pushMessage(`${npcDisplayName(npc)} is hurt and returns home to recover.`);
+      }
+      npc.recovering = true;
+      this.clearNpcGatherTask(npc);
+      return false;
+    }
+
+    if ((npc.gatheredCount ?? 0) >= (npc.gatherTargetCount ?? ALLIED_GATHER_STACK_TARGET)) {
+      const label = RESOURCE_DEFINITIONS[npc.gatherResourceId]?.label ?? npc.gatherResourceId;
+      this.hud.pushMessage(`${npcDisplayName(npc)} gathered a stack of ${label}.`);
+      npc.recovering = true;
+      this.clearNpcGatherTask(npc);
+      return false;
+    }
+
+    if (!this.isValidGatherTarget(npc, npc.gatherResourceId)) {
+      const target = this.findNpcGatherTarget(npc, npc.gatherResourceId);
+      if (!target) {
+        const homeX = (npc.homeTileX ?? Math.floor(npc.x)) + 0.5;
+        const homeY = (npc.homeTileY ?? Math.floor(npc.y)) + 0.5;
+        this.moveNpcToward(npc, homeX, homeY, dt, 0.75);
+        return true;
+      }
+
+      npc.gatherTargetTileX = target.tileX;
+      npc.gatherTargetTileY = target.tileY;
+      npc.gatherTargetObjectId = target.objectId;
+      npc.gatherStandTileX = target.standTileX;
+      npc.gatherStandTileY = target.standTileY;
+    }
+
+    const standX = (npc.gatherStandTileX ?? npc.gatherTargetTileX) + 0.5;
+    const standY = (npc.gatherStandTileY ?? npc.gatherTargetTileY) + 0.5;
+    const standDistance = Math.hypot(standX - npc.x, standY - npc.y);
+
+    if (standDistance > 0.58) {
+      this.moveNpcToward(npc, standX, standY, dt, 1.05);
+      return true;
+    }
+
+    if ((npc.gatherActionCooldown ?? 0) > 0) {
+      return true;
+    }
+
+    const harvested = this.tryHarvestNpcGatherTarget(npc);
+    npc.gatherActionCooldown = 0.55;
+    if (!harvested) {
+      npc.gatherTargetTileX = null;
+      npc.gatherTargetTileY = null;
+      npc.gatherTargetObjectId = null;
+      npc.gatherStandTileX = null;
+      npc.gatherStandTileY = null;
+      return true;
+    }
+
+    npc.gatheredCount = (npc.gatheredCount ?? 0) + 1;
+    npc.gatherTargetTileX = null;
+    npc.gatherTargetTileY = null;
+    npc.gatherTargetObjectId = null;
+    npc.gatherStandTileX = null;
+    npc.gatherStandTileY = null;
+
+    if ((npc.gatheredCount ?? 0) >= (npc.gatherTargetCount ?? ALLIED_GATHER_STACK_TARGET)) {
+      const label = RESOURCE_DEFINITIONS[npc.gatherResourceId]?.label ?? npc.gatherResourceId;
+      this.hud.pushMessage(`${npcDisplayName(npc)} completed gathering ${label}.`);
+      npc.recovering = true;
+      this.clearNpcGatherTask(npc);
+      return false;
+    }
+
+    return true;
+  }
+
+  tryAlliedAutoCraft(npc) {
+    if (!npc.desiredCraftRecipeId) {
+      return false;
+    }
+
+    const recipe = CRAFTING_RECIPES.find((candidate) => candidate.id === npc.desiredCraftRecipeId);
+    if (!recipe) {
+      npc.desiredCraftRecipeId = null;
+      return false;
+    }
+
+    const room = this.getSettledNpcRoom(npc);
+    const support = this.findRoomSupportObjects(room);
+    if (!support.chest || support.workbenches.length === 0) {
+      return false;
+    }
+
+    const bench = support.workbenches.find((object) => {
+      const stationId = stationIdForObjectType(object.type);
+      return !!stationId && recipe.stations.includes(stationId);
+    });
+    if (!bench) {
+      return false;
+    }
+
+    const chestSlots = support.chest.data?.slots;
+    if (!Array.isArray(chestSlots)) {
+      return false;
+    }
+
+    if (!hasRecipeInputs(chestSlots, recipe)) {
+      return false;
+    }
+
+    for (const [toolId, amount] of Object.entries(recipe.toolOutputs ?? {})) {
+      if (amount <= 0) {
+        continue;
+      }
+
+      const playerHas = this.playerOwnsTool(toolId);
+      const npcHas = this.npcHasTool(npc, toolId);
+      if (playerHas && npcHas) {
+        return false;
+      }
+    }
+
+    const resourceOutputCount = Object.values(recipe.outputs ?? {}).reduce((sum, amount) => sum + amount, 0);
+    if (resourceOutputCount > 0) {
+      const inputCount = Object.values(recipe.inputs ?? {}).reduce((sum, amount) => sum + amount, 0);
+      const freeAfterConsume = countEmptySlots(chestSlots) + inputCount;
+      if (freeAfterConsume < resourceOutputCount) {
+        return false;
+      }
+    }
+
+    consumeSlotInputs(chestSlots, recipe.inputs);
+
+    for (const [resourceId, amount] of Object.entries(recipe.outputs ?? {})) {
+      addResourceToSlots(chestSlots, resourceId, amount);
+    }
+
+    for (const [toolId, amount] of Object.entries(recipe.toolOutputs ?? {})) {
+      if (amount <= 0) {
+        continue;
+      }
+
+      if (!this.playerOwnsTool(toolId)) {
+        this.addPlayerTool(toolId);
+      } else if (!this.npcHasTool(npc, toolId)) {
+        npc.toolInventory.push(toolId);
+      }
+    }
+
+    this.hud.pushMessage(`${npcDisplayName(npc)} crafted ${recipe.name}.`);
+    return true;
+  }
+
+  updateAlliedAutoCraft(npc, dt) {
+    if (!npc.desiredCraftRecipeId || npc.gatherResourceId) {
+      return;
+    }
+
+    npc.autoCraftCooldown = Math.max(0, (npc.autoCraftCooldown ?? 0) - dt);
+    if (npc.autoCraftCooldown > 0) {
+      return;
+    }
+
+    this.tryAlliedAutoCraft(npc);
+    npc.autoCraftCooldown = ALLIED_AUTOCRAFT_INTERVAL + Math.random() * 1.8;
   }
 
   initializeGoblinSpawnPoints() {
@@ -2074,6 +2686,81 @@ export class Game {
     return this.getToolbarAssignment(this.state.selectedSlot);
   }
 
+
+  playerOwnsTool(toolId) {
+    return !!this.state.ownedTools?.[toolId];
+  }
+
+  addPlayerTool(toolId) {
+    if (!TOOL_DEFINITIONS[toolId]) {
+      return false;
+    }
+
+    if (!this.state.ownedTools) {
+      this.state.ownedTools = {};
+    }
+
+    const alreadyOwned = !!this.state.ownedTools[toolId];
+    this.state.ownedTools[toolId] = true;
+    return !alreadyOwned;
+  }
+
+  removeToolFromLoadouts(toolId) {
+    for (let i = 0; i < this.state.toolbarSlots.length; i += 1) {
+      const slot = this.state.toolbarSlots[i];
+      if (slot?.kind === ACTION_ITEM_KIND.TOOL && slot.id === toolId) {
+        this.state.toolbarSlots[i] = null;
+      }
+    }
+
+    for (const hotbar of this.state.hotbars) {
+      for (let i = 0; i < hotbar.length; i += 1) {
+        const slot = hotbar[i];
+        if (slot?.kind === ACTION_ITEM_KIND.TOOL && slot.id === toolId) {
+          hotbar[i] = null;
+        }
+      }
+    }
+
+    if (this.state.selectedTool === toolId) {
+      const fallback = Object.values(ToolId).find((id) => this.playerOwnsTool(id));
+      this.state.selectedTool = fallback ?? ToolId.KNIFE;
+    }
+
+    this.selectToolbarSlot(this.state.selectedSlot, false);
+  }
+
+  transferToolToNpc(npc, toolId) {
+    if (!npc || !TOOL_DEFINITIONS[toolId]) {
+      return false;
+    }
+
+    if (!this.playerOwnsTool(toolId)) {
+      this.hud.pushMessage(`You do not currently own ${TOOL_DEFINITIONS[toolId].label}.`);
+      return false;
+    }
+
+    npc.toolInventory = Array.isArray(npc.toolInventory) ? npc.toolInventory : [];
+    if (npc.toolInventory.includes(toolId)) {
+      this.hud.pushMessage(`${npcDisplayName(npc)} already has a ${TOOL_DEFINITIONS[toolId].label}.`);
+      return false;
+    }
+
+    this.state.ownedTools[toolId] = false;
+    this.removeToolFromLoadouts(toolId);
+    npc.toolInventory.push(toolId);
+    this.hud.pushMessage(`Gave ${TOOL_DEFINITIONS[toolId].label} to ${npcDisplayName(npc)}.`);
+    return true;
+  }
+
+  npcHasTool(npc, toolId) {
+    return Array.isArray(npc?.toolInventory) && npc.toolInventory.includes(toolId);
+  }
+
+  getHeldActionView() {
+    return this.getActionItemView(this.getSelectedToolbarAssignment());
+  }
+
   getResourceActionType(resourceId) {
     if (CONSUMABLE_RESOURCE_IDS.has(resourceId)) {
       return "consumable";
@@ -2094,7 +2781,7 @@ export class Game {
 
     if (normalized.kind === ACTION_ITEM_KIND.TOOL) {
       const toolDef = TOOL_DEFINITIONS[normalized.id];
-      if (!toolDef) {
+      if (!toolDef || !this.playerOwnsTool(normalized.id)) {
         return null;
       }
 
@@ -2556,7 +3243,8 @@ export class Game {
       target.object.type === ObjectType.SMELTER ||
       target.object.type === ObjectType.STONE_CUTTER ||
       target.object.type === ObjectType.STOVE ||
-      target.object.type === ObjectType.CONSTRUCTION_BENCH
+      target.object.type === ObjectType.CONSTRUCTION_BENCH ||
+      target.object.type === ObjectType.SMALL_CHEST
     ) {
       this.state.ui.playerWindowOpen = false;
       this.state.ui.hammerWindowOpen = false;
@@ -2575,6 +3263,8 @@ export class Game {
         label = "Stove";
       } else if (target.object.type === ObjectType.CONSTRUCTION_BENCH) {
         label = "Construction Bench";
+      } else if (target.object.type === ObjectType.SMALL_CHEST) {
+        label = "Small Chest";
       }
 
       this.hud.pushMessage(`Opened ${label} window.`);
@@ -2709,9 +3399,61 @@ export class Game {
     };
   }
 
+  handleAlliedNpcInteraction(npc) {
+    const heldView = this.getHeldActionView();
+    if (!heldView) {
+      const gatherLabel = npc.gatherResourceId
+        ? `Gathering ${RESOURCE_DEFINITIONS[npc.gatherResourceId]?.label ?? npc.gatherResourceId} (${npc.gatheredCount ?? 0}/${npc.gatherTargetCount ?? ALLIED_GATHER_STACK_TARGET})`
+        : "No gather task";
+      const craftRecipe = npc.desiredCraftRecipeId
+        ? CRAFTING_RECIPES.find((recipe) => recipe.id === npc.desiredCraftRecipeId)?.name ?? "Unknown"
+        : "No craft task";
+      this.hud.pushMessage(`${npcDisplayName(npc)} status: ${gatherLabel} | Craft target: ${craftRecipe}.`);
+      return;
+    }
+
+    if (heldView.itemKind === ACTION_ITEM_KIND.TOOL) {
+      if (this.transferToolToNpc(npc, heldView.itemId)) {
+        return;
+      }
+
+      const recipe = this.findRecipeForHeldAction(heldView);
+      if (recipe) {
+        this.setAlliedCraftObjective(npc, recipe);
+        return;
+      }
+
+      this.hud.pushMessage("That tool cannot be used as an ally command.");
+      return;
+    }
+
+    if (heldView.itemKind === ACTION_ITEM_KIND.RESOURCE) {
+      if (ALLIED_GATHERABLE_RESOURCES.has(heldView.itemId)) {
+        this.setAlliedGatherObjective(npc, heldView.itemId);
+        return;
+      }
+
+      const recipe = this.findRecipeForHeldAction(heldView);
+      if (recipe) {
+        this.setAlliedCraftObjective(npc, recipe);
+        return;
+      }
+
+      this.hud.pushMessage("No ally command is mapped to that item.");
+      return;
+    }
+
+    this.hud.pushMessage("That item cannot be used for ally commands.");
+  }
+
   handleNpcInteraction(npc) {
     if (!npc || !npc.alive) {
       this.hud.pushMessage("No living NPC in range.");
+      return;
+    }
+
+    if (npc.category === "allied") {
+      this.handleAlliedNpcInteraction(npc);
       return;
     }
 
@@ -2851,6 +3593,9 @@ export class Game {
   }
 
   buildObjectType(buildId) {
+    if (buildId === BuildId.SMALL_CHEST) {
+      return ObjectType.SMALL_CHEST;
+    }
     if (buildId === BuildId.STONE_CUTTER) {
       return ObjectType.STONE_CUTTER;
     }
@@ -2874,6 +3619,12 @@ export class Game {
   }
 
   buildObjectData(buildId) {
+    if (buildId === BuildId.SMALL_CHEST) {
+      return {
+        slots: Array(SMALL_CHEST_SLOT_COUNT).fill(null),
+      };
+    }
+
     if (buildId === BuildId.STONE_CUTTER) {
       return {
         ingredients: [],
@@ -3090,6 +3841,13 @@ export class Game {
       return;
     }
 
+    if (removed.type === ObjectType.SMALL_CHEST) {
+      this.addResource(ResourceId.SMALL_CHEST, 1);
+      this.refundIngredientsToInventory(removed.data.slots ?? []);
+      this.hud.pushMessage("Reclaimed Small Chest (+1 chest, contents returned).");
+      return;
+    }
+
     if (removed.type === ObjectType.WALL_SEGMENT) {
       this.addResource(ResourceId.WALL_KIT, 1);
       this.hud.pushMessage("Reclaimed constructed wall segment (+1 wall kit).");
@@ -3152,7 +3910,7 @@ export class Game {
     }
 
     for (const toolDef of Object.values(TOOL_DEFINITIONS)) {
-      if (assignedToolIds.has(toolDef.id)) {
+      if (!this.playerOwnsTool(toolDef.id) || assignedToolIds.has(toolDef.id)) {
         continue;
       }
 
@@ -3374,6 +4132,20 @@ export class Game {
 
       this.ensureObjectCraftData(object);
 
+      if (object.type === ObjectType.SMALL_CHEST) {
+        return {
+          contextId: "object",
+          stationId: StationId.STORAGE,
+          slots: object.data.slots,
+          maxSlots: SMALL_CHEST_SLOT_COUNT,
+          getSelectedRecipeId: () => null,
+          setSelectedRecipeId: () => {},
+          title: "Small Chest",
+          subtitle: `Tile ${object.tileX}, ${object.tileY}`,
+          settings: "Storage only. Drag resources in and out.",
+        };
+      }
+
       if (object.type === ObjectType.SMELTER) {
         return {
           contextId: "object",
@@ -3441,8 +4213,11 @@ export class Game {
 
     return null;
   }
+  isResourceAllowedForStation(stationId, resourceId) {
+    if (stationId === StationId.STORAGE) {
+      return !!RESOURCE_DEFINITIONS[resourceId];
+    }
 
-    isResourceAllowedForStation(stationId, resourceId) {
     const recipes = this.getRecipesForStation(stationId);
     return recipes.some((recipe) => Object.keys(recipe.inputs).includes(resourceId));
   }
@@ -3468,6 +4243,11 @@ export class Game {
 
     const normalized = normalizeLoadoutItem(action.item);
     if (!normalized) {
+      return;
+    }
+
+    if (normalized.kind === ACTION_ITEM_KIND.TOOL && !this.playerOwnsTool(normalized.id)) {
+      this.hud.pushMessage("You do not currently own that tool.");
       return;
     }
 
@@ -3745,7 +4525,7 @@ export class Game {
 
     const recipes = this.getRecipesForStation(context.stationId);
     if (recipes.length === 0) {
-      this.hud.pushMessage("No recipes available for this station.");
+      this.hud.pushMessage("This object is storage-only.");
       return;
     }
 
@@ -3759,13 +4539,26 @@ export class Game {
       return;
     }
 
+    for (const [toolId, amount] of Object.entries(recipe.toolOutputs ?? {})) {
+      if (amount > 0 && this.playerOwnsTool(toolId)) {
+        this.hud.pushMessage(`You already own ${TOOL_DEFINITIONS[toolId]?.label ?? toolId}.`);
+        return;
+      }
+    }
+
     consumeSlotInputs(context.slots, recipe.inputs);
 
-    for (const [resourceId, amount] of Object.entries(recipe.outputs)) {
+    for (const [resourceId, amount] of Object.entries(recipe.outputs ?? {})) {
       this.addResource(resourceId, amount);
     }
 
-    this.hud.pushMessage(`Crafted ${recipe.name}: ${resourceString(recipe.outputs)}.`);
+    for (const [toolId, amount] of Object.entries(recipe.toolOutputs ?? {})) {
+      if (amount > 0) {
+        this.addPlayerTool(toolId);
+      }
+    }
+
+    this.hud.pushMessage(`Crafted ${recipe.name}: ${recipeOutputString(recipe)}.`);
   }
 
   syncObjectWindowValidity() {
@@ -3779,7 +4572,8 @@ export class Game {
       (object.type !== ObjectType.SMELTER &&
         object.type !== ObjectType.STOVE &&
         object.type !== ObjectType.STONE_CUTTER &&
-        object.type !== ObjectType.CONSTRUCTION_BENCH)
+        object.type !== ObjectType.CONSTRUCTION_BENCH &&
+        object.type !== ObjectType.SMALL_CHEST)
     ) {
       this.state.ui.objectWindowOpen = false;
       this.state.ui.objectWindowObjectId = null;
@@ -3794,8 +4588,19 @@ export class Game {
     }
 
     const recipes = this.getRecipesForStation(context.stationId);
+
     if (recipes.length === 0) {
-      return null;
+      return {
+        contextId,
+        title: context.title,
+        subtitle: context.subtitle,
+        settings: context.settings,
+        slots: context.slots,
+        maxSlots: context.maxSlots,
+        selectedRecipeId: null,
+        recipes: [],
+        canCraftSelected: false,
+      };
     }
 
     let selectedRecipeId = context.getSelectedRecipeId();
@@ -3808,7 +4613,7 @@ export class Game {
       id: recipe.id,
       name: recipe.name,
       requires: resourceString(recipe.inputs),
-      produces: resourceString(recipe.outputs),
+      produces: recipeOutputString(recipe),
       canCraft: hasRecipeInputs(context.slots, recipe),
     }));
 
@@ -3922,6 +4727,42 @@ export class Game {
     this.hud.setWindowState(this.buildWindowState());
   }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

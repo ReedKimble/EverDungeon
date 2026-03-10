@@ -321,6 +321,13 @@ body {
   border-bottom: 1px solid var(--panel-border);
   padding: 8px 10px;
   background: rgba(255, 255, 255, 0.05);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.window-header:active {
+  cursor: grabbing;
 }
 
 .window-header h3 {
@@ -827,27 +834,3 @@ body {
     display: none;
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

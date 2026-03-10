@@ -24,6 +24,7 @@ export const ObjectType = Object.freeze({
   WOODY_ROOT: "woody-root",
   MUSHROOM: "mushroom",
   PICKUP: "pickup-item",
+  SMALL_CHEST: "small-chest",
   STONE_CUTTER: "stone-cutter-workbench",
   SMELTER: "smelter-workbench",
   STOVE: "stove-workbench",
@@ -61,6 +62,7 @@ export const TOOL_DEFINITIONS = Object.freeze({
 
 export const BuildId = Object.freeze({
   STONE_BLOCK: "stone-block",
+  SMALL_CHEST: "small-chest",
   STONE_CUTTER: "stone-cutter-workbench",
   SMELTER: "smelter-workbench",
   STOVE: "stove-workbench",
@@ -75,6 +77,7 @@ export const StationId = Object.freeze({
   CONSTRUCTION_BENCH: "construction-bench",
   SMELTER: "smelter",
   STOVE: "stove",
+  STORAGE: "storage",
 });
 
 export const ResourceId = Object.freeze({
@@ -84,6 +87,7 @@ export const ResourceId = Object.freeze({
   MUSHROOM: "mushroom",
   MEAT: "meat",
   SIMPLE_STEW: "simpleStew",
+  SMALL_CHEST: "smallChest",
   COPPER_ORE: "copperOre",
   ZINC_ORE: "zincOre",
   IRON_ORE: "ironOre",
@@ -133,6 +137,12 @@ export const RESOURCE_DEFINITIONS = Object.freeze({
     label: "Simple Stew",
     icon: "SW",
     className: "res-simplestew",
+  },
+  [ResourceId.SMALL_CHEST]: {
+    id: ResourceId.SMALL_CHEST,
+    label: "Small Chest",
+    icon: "CH",
+    className: "res-smallchest",
   },
   [ResourceId.COPPER_ORE]: {
     id: ResourceId.COPPER_ORE,
@@ -204,6 +214,7 @@ export const RESOURCE_DEFINITIONS = Object.freeze({
 
 export const BUILD_OPTIONS = Object.freeze([
   BuildId.STONE_BLOCK,
+  BuildId.SMALL_CHEST,
   BuildId.STONE_CUTTER,
   BuildId.SMELTER,
   BuildId.STOVE,
@@ -243,6 +254,11 @@ export const BUILD_DEFINITIONS = Object.freeze({
     name: "Raw Stone Block",
     icon: "RB",
     costs: { [ResourceId.STONE_BLOCK]: 1 },
+  },
+  [BuildId.SMALL_CHEST]: {
+    name: "Small Chest",
+    icon: "CH",
+    costs: { [ResourceId.SMALL_CHEST]: 1 },
   },
   [BuildId.STONE_CUTTER]: {
     name: "Stone Cutter Workbench",
@@ -313,6 +329,29 @@ export const CRAFTING_RECIPES = Object.freeze([
     outputs: { [ResourceId.DOOR_KIT]: 1 },
   },
   {
+    id: "small-chest",
+    name: "Small Chest",
+    stations: [StationId.CONSTRUCTION_BENCH],
+    inputs: { [ResourceId.WOODY_ROOT]: 1, [ResourceId.ZINC_INGOT]: 1 },
+    outputs: { [ResourceId.SMALL_CHEST]: 1 },
+  },
+  {
+    id: "knife-basic",
+    name: "Knife",
+    stations: [StationId.CONSTRUCTION_BENCH],
+    inputs: { [ResourceId.WOODY_ROOT]: 1, [ResourceId.IRON_INGOT]: 1 },
+    outputs: {},
+    toolOutputs: { [ToolId.KNIFE]: 1 },
+  },
+  {
+    id: "pickaxe-basic",
+    name: "Pickaxe",
+    stations: [StationId.CONSTRUCTION_BENCH],
+    inputs: { [ResourceId.WOODY_ROOT]: 2, [ResourceId.IRON_INGOT]: 3 },
+    outputs: {},
+    toolOutputs: { [ToolId.PICKAXE]: 1 },
+  },
+  {
     id: "smelt-copper",
     name: "Smelt Copper",
     stations: [StationId.SMELTER],
@@ -341,6 +380,3 @@ export const CRAFTING_RECIPES = Object.freeze([
     outputs: { [ResourceId.SIMPLE_STEW]: 1 },
   },
 ]);
-
-
-
