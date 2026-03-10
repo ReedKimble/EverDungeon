@@ -758,6 +758,8 @@ export class Game {
         hammerWindowOpen: false,
         objectWindowOpen: false,
         objectWindowObjectId: null,
+        questJournalOpen: false,
+        questJournalTab: "active",
         playerConstruction: {
           stationId: StationId.PLAYER,
           slots: Array(4).fill(null),
@@ -794,7 +796,7 @@ export class Game {
 
     this.hud.setToolbarActive(this.state.selectedSlot);
     this.hud.pushMessage("Updated: Drag inventory items onto toolbar and hotbar slots. Mouse wheel cycles toolbar, hotbar uses Q/E/R/T/Z/X/C/V.");
-    this.hud.pushMessage("F interacts with NPCs, doors, and crafting objects. TAB opens player window. U reclaims placed objects.");
+    this.hud.pushMessage("F interacts with NPCs, doors, and crafting objects. TAB opens player window. J opens quest journal. U reclaims placed objects.");
 
     this.refreshHud();
   }
@@ -2042,7 +2044,7 @@ export class Game {
   }
 
   windowsOpen() {
-    return this.state.ui.playerWindowOpen || this.state.ui.hammerWindowOpen || this.state.ui.objectWindowOpen;
+    return this.state.ui.playerWindowOpen || this.state.ui.hammerWindowOpen || this.state.ui.objectWindowOpen || this.state.ui.questJournalOpen;
   }
 
   releasePointerLock() {
@@ -2430,6 +2432,7 @@ export class Game {
 
   handleGeneralActions() {
     const togglePlayerWindow = this.input.consumeAction("Tab");
+    const toggleQuestJournal = this.input.consumeAction("KeyJ");
     const interactAction = this.input.consumeAction("KeyF");
     const secondaryAction = this.input.consumeAction("MouseRight");
     const selectedItem = this.getSelectedToolbarAssignment();
@@ -2441,8 +2444,21 @@ export class Game {
         this.state.ui.hammerWindowOpen = false;
         this.state.ui.objectWindowOpen = false;
         this.state.ui.objectWindowObjectId = null;
+        this.state.ui.questJournalOpen = false;
         this.releasePointerLock();
         this.hud.pushMessage("Player window opened.");
+      }
+    }
+
+    if (toggleQuestJournal) {
+      this.state.ui.questJournalOpen = !this.state.ui.questJournalOpen;
+      if (this.state.ui.questJournalOpen) {
+        this.state.ui.playerWindowOpen = false;
+        this.state.ui.hammerWindowOpen = false;
+        this.state.ui.objectWindowOpen = false;
+        this.state.ui.objectWindowObjectId = null;
+      this.releasePointerLock();
+        this.hud.pushMessage("Quest journal opened.");
       }
     }
 
@@ -2490,6 +2506,7 @@ export class Game {
       this.state.ui.playerWindowOpen = false;
       this.state.ui.objectWindowOpen = false;
       this.state.ui.objectWindowObjectId = null;
+      this.state.ui.questJournalOpen = false;
       this.releasePointerLock();
       this.hud.pushMessage("Hammer build window opened.");
     }
@@ -2541,7 +2558,9 @@ export class Game {
       target.object.type === ObjectType.STOVE ||
       target.object.type === ObjectType.CONSTRUCTION_BENCH
     ) {
+      this.state.ui.playerWindowOpen = false;
       this.state.ui.hammerWindowOpen = false;
+      this.state.ui.questJournalOpen = false;
       this.state.ui.objectWindowOpen = true;
       this.state.ui.objectWindowObjectId = target.object.id;
       this.releasePointerLock();
@@ -2727,6 +2746,19 @@ export class Game {
       }
 
       if (step.readyToTurnIn) {
+        if (step.type === "collect") {
+          const available = this.state.resources[step.resourceId] ?? 0;
+          if (available < step.required) {
+            const resourceLabel = RESOURCE_DEFINITIONS[step.resourceId]?.label ?? "resource";
+            this.hud.pushMessage(
+              `Turn-in failed: need ${step.required} ${resourceLabel} in inventory (${available}/${step.required}).`,
+            );
+            return;
+          }
+
+          this.state.resources[step.resourceId] = available - step.required;
+        }
+
         step.readyToTurnIn = false;
         npc.quest.completedSteps += 1;
 
@@ -3523,6 +3555,18 @@ export class Game {
       return;
     }
 
+    if (action.type === "close-quest-window") {
+      this.state.ui.questJournalOpen = false;
+      return;
+    }
+
+    if (action.type === "set-quest-journal-tab") {
+      if (action.tab === "active" || action.tab === "completed") {
+        this.state.ui.questJournalTab = action.tab;
+      }
+      return;
+    }
+
     if (action.type === "select-toolbar-slot") {
       this.selectToolbarSlot(action.slotIndex, true);
       return;
@@ -3797,7 +3841,57 @@ export class Game {
     });
   }
 
-    buildWindowState() {
+  buildQuestJournalView() {
+    const active = [];
+    const completed = [];
+
+    for (const npc of this.state.npcs) {
+      if (npc.kind !== "goblin" || !npc.quest) {
+        continue;
+      }
+
+      const quest = npc.quest;
+      const stageIndex = Math.max(0, quest.currentStepIndex ?? 0);
+      const stage = quest.steps?.[stageIndex] ?? null;
+      const stageLabel = quest.completed
+        ? "Quest chain complete."
+        : `${describeQuestStep(stage)}${stage?.readyToTurnIn ? " (Turn in ready)" : ""}`;
+      const metaParts = [
+        `Goblin Lv ${npc.level ?? 1}`,
+        `Stages ${quest.completedSteps ?? 0}/${quest.requiredSteps ?? 1}`,
+      ];
+
+      if (quest.completed) {
+        metaParts.push(npc.category === "allied" ? "Allied" : "Ready to recruit");
+      } else {
+        metaParts.push(`Current ${stageIndex + 1}/${quest.chainLength ?? quest.steps?.length ?? 1}`);
+      }
+
+      const entry = {
+        id: npc.id,
+        title: `Goblin #${npc.id}`,
+        meta: metaParts.join(" | "),
+        stage: stageLabel,
+      };
+
+      if (quest.completed) {
+        completed.push(entry);
+      } else {
+        active.push(entry);
+      }
+    }
+
+    active.sort((a, b) => a.id - b.id);
+    completed.sort((a, b) => a.id - b.id);
+
+    return {
+      selectedTab: this.state.ui.questJournalTab === "completed" ? "completed" : "active",
+      active,
+      completed,
+    };
+  }
+
+  buildWindowState() {
     const selectedToolbarView = this.getActionItemView(this.getSelectedToolbarAssignment());
     const hammerOpen =
       this.state.ui.hammerWindowOpen &&
@@ -3808,6 +3902,7 @@ export class Game {
       playerOpen: this.state.ui.playerWindowOpen,
       hammerOpen,
       objectOpen: this.state.ui.objectWindowOpen,
+      questOpen: this.state.ui.questJournalOpen,
       selectedBuild: this.state.selectedBuild,
       selectedToolbarSlot: this.state.selectedSlot,
       toolbarSlots: this.buildActionSlotsView(this.state.toolbarSlots),
@@ -3818,6 +3913,7 @@ export class Game {
       inventorySlots: this.buildInventorySlotsView(),
       playerContext: this.state.ui.playerWindowOpen ? this.buildContextView("player") : null,
       objectContext: this.state.ui.objectWindowOpen ? this.buildContextView("object") : null,
+      questJournal: this.state.ui.questJournalOpen ? this.buildQuestJournalView() : null,
     };
   }
 
@@ -3826,6 +3922,17 @@ export class Game {
     this.hud.setWindowState(this.buildWindowState());
   }
 }
+
+
+
+
+
+
+
+
+
+
+
 
 
 

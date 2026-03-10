@@ -107,6 +107,20 @@
             </div>
           </div>
         </section>
+
+        <section id="quest-window" class="game-window hidden" aria-label="Quest journal">
+          <header class="window-header">
+            <h3>Quest Journal</h3>
+            <button id="quest-window-close" type="button" class="window-close" aria-label="Close quest journal">X</button>
+          </header>
+          <div class="window-body">
+            <div class="journal-tabs">
+              <button id="quest-tab-active" type="button" class="journal-tab-btn selected">Active</button>
+              <button id="quest-tab-completed" type="button" class="journal-tab-btn">Completed</button>
+            </div>
+            <div id="quest-journal-list" class="quest-list"></div>
+          </div>
+        </section>
       </div>
 
       <div id="help">
@@ -115,7 +129,7 @@
         <p>Click view to lock mouse. WASD + Mouse look, Shift sprint.</p>
         <p>Mouse1 activates selected toolbar slot. Mouse2 opens hammer build window when Hammer is selected. Mouse wheel cycles toolbar.</p>
         <p>Hotbar keys Q/E/R/T/Z/X/C/V activate assigned slots. G/B cycles active hotbar page.</p>
-        <p>F interacts with NPCs, doors, and crafting objects. TAB opens player window. U reclaims placed objects.</p>
+        <p>F interacts with NPCs, doors, and crafting objects. TAB opens player window. J opens quest journal. U reclaims placed objects.</p>
         <p>Drag inventory items into crafting slots, toolbar slots, or hotbar slots.</p>
       </div>
 
@@ -125,6 +139,7 @@
     <script type="module" src="./src/main.js"></script>
   </body>
 </html>
+
 
 
 

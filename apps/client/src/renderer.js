@@ -1181,15 +1181,68 @@ function drawNpcSprite(ctx, sprite) {
   ctx.fillRect(x + width * 0.57 - legStride, y + height * 0.81 + rightLegLift, width * 0.12, height * 0.16 - rightLegLift);
 
   ctx.fillStyle = visual.head;
-  ctx.beginPath();
-  ctx.arc(headX, headY, headR, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.stroke();
+  let eyeY = headY - headR * 0.1;
+  let leftEyeX = headX - headR * 0.45;
+  let rightEyeX = headX + headR * 0.19;
+  let eyeW = headR * 0.26;
+  let eyeH = headR * 0.22;
+
+  if (visual.golem) {
+    const halfW = headR * 0.92;
+    const halfH = headR * 0.88;
+    const bevel = headR * 0.2;
+    ctx.beginPath();
+    ctx.moveTo(headX - halfW + bevel, headY - halfH);
+    ctx.lineTo(headX + halfW - bevel, headY - halfH);
+    ctx.lineTo(headX + halfW, headY - halfH + bevel);
+    ctx.lineTo(headX + halfW, headY + halfH - bevel);
+    ctx.lineTo(headX + halfW - bevel, headY + halfH);
+    ctx.lineTo(headX - halfW + bevel, headY + halfH);
+    ctx.lineTo(headX - halfW, headY + halfH - bevel);
+    ctx.lineTo(headX - halfW, headY - halfH + bevel);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    eyeY = headY - halfH * 0.14;
+    leftEyeX = headX - halfW * 0.56;
+    rightEyeX = headX + halfW * 0.16;
+    eyeW = headR * 0.3;
+    eyeH = headR * 0.2;
+  } else {
+    if (visual.goblin) {
+      const earTopY = headY - headR * 1.18;
+      const earBaseY = headY - headR * 0.35;
+      const earOuterX = headX - headR * 0.9;
+      const earInnerX = headX - headR * 0.46;
+      ctx.beginPath();
+      ctx.moveTo(earInnerX, earBaseY);
+      ctx.lineTo(earOuterX, earTopY);
+      ctx.lineTo(headX - headR * 0.32, headY - headR * 0.72);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      const rightEarOuterX = headX + headR * 0.9;
+      const rightEarInnerX = headX + headR * 0.46;
+      ctx.beginPath();
+      ctx.moveTo(rightEarInnerX, earBaseY);
+      ctx.lineTo(rightEarOuterX, earTopY);
+      ctx.lineTo(headX + headR * 0.32, headY - headR * 0.72);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    ctx.beginPath();
+    ctx.arc(headX, headY, headR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
 
   ctx.fillStyle = visual.eye;
-  const eyeY = headY - headR * 0.1;
-  ctx.fillRect(headX - headR * 0.45, eyeY, headR * 0.26, headR * 0.22);
-  ctx.fillRect(headX + headR * 0.19, eyeY, headR * 0.26, headR * 0.22);
+  ctx.fillRect(leftEyeX, eyeY, eyeW, eyeH);
+  ctx.fillRect(rightEyeX, eyeY, eyeW, eyeH);
 
   if (attackTelegraph > 0.01) {
     ctx.fillStyle = "rgba(255, 136, 118, " + (0.2 + attackTelegraph * 0.45) + ")";

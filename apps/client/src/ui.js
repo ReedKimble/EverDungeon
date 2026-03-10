@@ -128,6 +128,11 @@ export class Hud {
     this.hammerWindow = document.getElementById("hammer-window");
     this.hammerWindowClose = document.getElementById("hammer-window-close");
     this.hammerBuildList = document.getElementById("hammer-build-list");
+    this.questWindow = document.getElementById("quest-window");
+    this.questWindowClose = document.getElementById("quest-window-close");
+    this.questTabActive = document.getElementById("quest-tab-active");
+    this.questTabCompleted = document.getElementById("quest-tab-completed");
+    this.questJournalList = document.getElementById("quest-journal-list");
 
     this.messageLog = [];
     this.windowSignature = "";
@@ -148,6 +153,15 @@ export class Hud {
     });
     this.hammerWindowClose.addEventListener("click", () => {
       this.emit({ type: "close-hammer-window" });
+    });
+    this.questWindowClose.addEventListener("click", () => {
+      this.emit({ type: "close-quest-window" });
+    });
+    this.questTabActive.addEventListener("click", () => {
+      this.emit({ type: "set-quest-journal-tab", tab: "active" });
+    });
+    this.questTabCompleted.addEventListener("click", () => {
+      this.emit({ type: "set-quest-journal-tab", tab: "completed" });
     });
 
     this.playerCraftButton.addEventListener("click", () => {
@@ -681,6 +695,34 @@ export class Hud {
     }
   }
 
+  renderQuestJournal(journal) {
+    const selectedTab = journal?.selectedTab === "completed" ? "completed" : "active";
+    const entries = selectedTab === "completed" ? (journal?.completed ?? []) : (journal?.active ?? []);
+
+    this.questTabActive?.classList.toggle("selected", selectedTab === "active");
+    this.questTabCompleted?.classList.toggle("selected", selectedTab === "completed");
+
+    if (!this.questJournalList) {
+      return;
+    }
+
+    this.questJournalList.innerHTML = "";
+    if (!entries.length) {
+      const empty = document.createElement("div");
+      empty.className = "quest-empty";
+      empty.textContent = selectedTab === "completed" ? "No completed quests." : "No active quests.";
+      this.questJournalList.append(empty);
+      return;
+    }
+
+    for (const quest of entries) {
+      const entry = document.createElement("article");
+      entry.className = "quest-entry";
+      entry.innerHTML = `<h5>${quest.title}</h5><p class="quest-meta">${quest.meta}</p><p class="quest-stage">${quest.stage}</p>`;
+      this.questJournalList.append(entry);
+    }
+  }
+
   setWindowState(windowState) {
     const signature = JSON.stringify(windowState);
     if (signature === this.windowSignature) {
@@ -700,6 +742,7 @@ export class Hud {
     this.playerWindow.classList.toggle("hidden", !windowState.playerOpen);
     this.hammerWindow.classList.toggle("hidden", !windowState.hammerOpen);
     this.objectWindow.classList.toggle("hidden", !windowState.objectOpen);
+    this.questWindow.classList.toggle("hidden", !windowState.questOpen);
 
     if (windowState.playerOpen && windowState.playerContext) {
       this.renderInventory(this.playerInventory, windowState.inventorySlots);
@@ -722,8 +765,15 @@ export class Hud {
       this.renderRecipes(this.objectRecipes, windowState.objectContext);
       this.objectCraftButton.disabled = !windowState.objectContext.canCraftSelected;
     }
+
+    if (windowState.questOpen) {
+      this.renderQuestJournal(windowState.questJournal);
+    }
   }
 }
+
+
+
 
 
 
